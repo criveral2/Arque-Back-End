@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from app.application.use_cases.inspect_dataset import InspectDatasetUseCase
 from app.infrastructure.repositories.esed_csv_repository import EsedCsvRepository
@@ -41,11 +41,32 @@ DATASET_PATH = (
     / "6. 2023_ESED_BDD_definitiva.csv"
 )
 
-PREPARED_DATASET_PATH = (
+DATASET_2023_PATH = (
+    BASE_DIR
+    / "data"
+    / "raw"
+    / "6. 2023_ESED_BDD_definitiva.csv"
+)
+
+DATASET_2025_PATH = (
+    BASE_DIR
+    / "data"
+    / "raw"
+    / "6. 2025_ESED_BDD.csv"
+)
+
+PREPARED_2023_PATH = (
     BASE_DIR
     / "data"
     / "processed"
     / "esed_2023_prepared.csv"
+)
+
+PREPARED_2025_PATH = (
+    BASE_DIR
+    / "data"
+    / "processed"
+    / "esed_2025_prepared.csv"
 )
 
 
@@ -113,24 +134,58 @@ def problematic_records() -> dict:
 
     return use_case.execute()
 
-@router.post("/prepare")
-def prepare_dataset() -> dict:
+@router.post("/prepare/{year}")
+def prepare_dataset(year: int) -> dict:
 
-    # Repositorio que lee el dataset original.
+    # ---------------------------------------------------------
+    # SELECCIÓN DE RUTAS SEGÚN EL AÑO
+    # ---------------------------------------------------------
+
+    # Asociamos cada año con:
+    # - el archivo original
+    # - el archivo preparado que se generará
+    datasets = {
+        2023: {
+            "source": DATASET_2023_PATH,
+            "target": PREPARED_2023_PATH
+        },
+        2025: {
+            "source": DATASET_2025_PATH,
+            "target": PREPARED_2025_PATH
+        }
+    }
+
+    # Validamos que el año solicitado esté soportado.
+    if year not in datasets:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Año ESED no soportado: {year}"
+        )
+
+    paths = datasets[year]
+
+    # Repositorio que lee la base original.
     source_repository = EsedCsvRepository(
-        DATASET_PATH
+        paths["source"]
     )
 
-    # Repositorio que guardará el dataset preparado.
+    # Repositorio que guarda el dataset preparado.
     target_repository = CsvPreparedDatasetRepository(
-        PREPARED_DATASET_PATH
+        paths["target"]
     )
 
-    # Creamos el caso de uso.
+    # Caso de uso encargado de aplicar
+    # las mismas reglas de preparación.
     use_case = PrepareDatasetUseCase(
         dataset_repository=source_repository,
         prepared_dataset_repository=target_repository
     )
 
-    # Ejecutamos la preparación.
-    return use_case.execute()
+    # Ejecutamos el proceso.
+    result = use_case.execute()
+
+    # Agregamos el año al resultado
+    # para facilitar la trazabilidad.
+    result["year"] = year
+
+    return result
