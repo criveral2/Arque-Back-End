@@ -1,6 +1,10 @@
 from sklearn.linear_model import LinearRegression
-from sklearn.ensemble import RandomForestRegressor
 from xgboost import XGBRegressor
+
+import numpy as np
+
+from sklearn.compose import TransformedTargetRegressor
+from sklearn.ensemble import RandomForestRegressor
 from sklearn.pipeline import Pipeline
 
 from app.infrastructure.ml.preprocessing import build_preprocessor
@@ -179,3 +183,60 @@ def build_xgboost_pipeline():
     )
 
     return pipeline
+
+def build_random_forest_log_pipeline():
+
+    # ---------------------------------------------------------
+    # 1. PREPROCESAMIENTO
+    # ---------------------------------------------------------
+
+    # Utilizamos exactamente el mismo procesamiento
+    # aplicado en los demás experimentos.
+    preprocessor = build_preprocessor()
+
+    # ---------------------------------------------------------
+    # 2. RANDOM FOREST
+    # ---------------------------------------------------------
+
+    random_forest = RandomForestRegressor(
+        n_estimators=200,
+        random_state=42,
+        n_jobs=-1
+    )
+
+    # ---------------------------------------------------------
+    # 3. TRANSFORMACIÓN DE LA VARIABLE OBJETIVO
+    # ---------------------------------------------------------
+
+    # El modelo se entrena internamente con:
+    #
+    # log1p(COSM2)
+    #
+    # pero cuando realiza una predicción aplica automáticamente:
+    #
+    # expm1(predicción)
+    #
+    # Por tanto, las predicciones finales vuelven a expresarse
+    # en USD/m².
+    transformed_model = TransformedTargetRegressor(
+        regressor=random_forest,
+        func=np.log1p,
+        inverse_func=np.expm1
+    )
+
+    # ---------------------------------------------------------
+    # 4. PIPELINE COMPLETO
+    # ---------------------------------------------------------
+
+    return Pipeline(
+        steps=[
+            (
+                "preprocessor",
+                preprocessor
+            ),
+            (
+                "model",
+                transformed_model
+            )
+        ]
+    )

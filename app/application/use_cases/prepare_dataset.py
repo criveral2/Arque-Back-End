@@ -1,3 +1,13 @@
+import pandas as pd
+
+from app.domain.model_features import (
+    CATEGORICAL_VARIABLES,
+    NUMERIC_VARIABLES,
+    TARGET_VARIABLE,
+    FEATURE_SET_NAME
+)
+
+
 class PrepareDatasetUseCase:
 
     # Variable utilizada únicamente para mantener
@@ -8,36 +18,13 @@ class PrepareDatasetUseCase:
         "id"
     ]
 
-    # Variables categóricas candidatas.
-    CATEGORICAL_VARIABLES = [
-        "codcantf",
-        "careaur",
-        "CTIPOBR",
-        "cimi",
-        "piso",
-        "estru",
-        "pared",
-        "cubi",
-        "CASAEDIF",
-        "CDISPUSO"
-    ]
-
-    # Variables numéricas candidatas.
-    NUMERIC_VARIABLES = [
-        "NUPICAL",
-        "CSUTE",
-        "CARCO"
-    ]
-
-    # Variable que intentaremos predecir.
-    TARGET_VARIABLE = "COSM2"
-
     def __init__(
         self,
         dataset_repository,
         prepared_dataset_repository
     ):
-        # Repositorio que lee ESED original.
+        # Repositorio encargado de leer
+        # la base ESED original.
         self.dataset_repository = dataset_repository
 
         # Repositorio encargado de guardar
@@ -52,24 +39,36 @@ class PrepareDatasetUseCase:
         # 1. CARGA DE DATOS
         # ---------------------------------------------------------
 
-        # Cargamos siempre desde data/raw.
+        # Cargamos siempre desde la fuente original
+        # almacenada en data/raw.
         dataset = self.dataset_repository.load()
 
+        # Guardamos el número inicial de registros
+        # para mantener trazabilidad del proceso.
         original_records = len(dataset)
 
         # ---------------------------------------------------------
-        # 2. VALIDACIÓN DE VARIABLES
+        # 2. DEFINICIÓN DE VARIABLES NECESARIAS
         # ---------------------------------------------------------
 
+        # Las variables predictoras se obtienen directamente
+        # desde model_features.py.
+        #
+        # Esto evita mantener diferentes listas de variables
+        # en distintos archivos del proyecto.
         required_columns = (
             self.TRACE_VARIABLES
-            + self.CATEGORICAL_VARIABLES
-            + self.NUMERIC_VARIABLES
-            + [self.TARGET_VARIABLE]
+            + CATEGORICAL_VARIABLES
+            + NUMERIC_VARIABLES
+            + [TARGET_VARIABLE]
         )
 
-        # Comprobamos que todas las columnas necesarias
-        # realmente existan en ESED.
+        # ---------------------------------------------------------
+        # 3. VALIDACIÓN DE VARIABLES
+        # ---------------------------------------------------------
+
+        # Comprobamos que todas las variables necesarias
+        # existan realmente en la versión de ESED utilizada.
         missing_columns = [
             column
             for column in required_columns
@@ -82,54 +81,114 @@ class PrepareDatasetUseCase:
             )
 
         # ---------------------------------------------------------
-        # 3. SELECCIÓN DE VARIABLES
+        # 4. SELECCIÓN DE VARIABLES
         # ---------------------------------------------------------
 
-        # Trabajamos únicamente con las variables relevantes
-        # para nuestra investigación.
+        # Conservamos únicamente:
+        #
+        # - id para trazabilidad
+        # - variables predictoras
+        # - variable objetivo COSM2
         prepared_dataset = dataset[
             required_columns
         ].copy()
 
         # ---------------------------------------------------------
-        # 4. DEPURACIÓN DE LA VARIABLE OBJETIVO
+        # 5. NORMALIZACIÓN DE VARIABLES NUMÉRICAS
         # ---------------------------------------------------------
 
-        # Eliminamos del conjunto de entrenamiento aquellos
-        # registros donde COSM2 no contiene un costo válido.
+        # Algunas variables numéricas de ESED pueden venir
+        # almacenadas como texto.
         #
-        # En ESED 2023 se identificaron 582 registros COSM2 = 0,
-        # correspondientes a reconstrucciones.
+        # Ejemplo:
         #
-        # El dataset original NO se modifica.
+        # "9"  -> 9
+        # "3"  -> 3
+        # " "  -> NaN
+        #
+        # errors="coerce" convierte cualquier valor que no
+        # pueda interpretarse como número en NaN.
+        #
+        # Los NaN de las variables predictoras NO se eliminan.
+        # Posteriormente serán tratados dentro del Pipeline
+        # utilizando SimpleImputer.
+        for column in NUMERIC_VARIABLES:
+            prepared_dataset[column] = pd.to_numeric(
+                prepared_dataset[column],
+                errors="coerce"
+            )
+
+        # También garantizamos que la variable objetivo
+        # COSM2 sea realmente numérica.
+        prepared_dataset[TARGET_VARIABLE] = pd.to_numeric(
+            prepared_dataset[TARGET_VARIABLE],
+            errors="coerce"
+        )
+
+        # ---------------------------------------------------------
+        # 6. DEPURACIÓN DE LA VARIABLE OBJETIVO
+        # ---------------------------------------------------------
+
+        # Conservamos únicamente registros donde COSM2
+        # tenga un valor válido y mayor que cero.
+        #
+        # Los valores NaN también quedan excluidos
+        # automáticamente mediante esta condición.
+        #
+        # En ESED 2023 se identificaron 582 registros
+        # con COSM2 = 0 correspondientes a reconstrucciones.
+        #
+        # IMPORTANTE:
+        # el archivo original ubicado en data/raw
+        # nunca se modifica.
         prepared_dataset = prepared_dataset[
-            prepared_dataset[self.TARGET_VARIABLE] > 0
+            prepared_dataset[TARGET_VARIABLE] > 0
         ].copy()
 
+        # Número de registros después de la preparación.
         final_records = len(prepared_dataset)
 
         # ---------------------------------------------------------
-        # 5. GUARDADO
+        # 7. GUARDADO
         # ---------------------------------------------------------
 
-        # Guardamos el dataset preparado en data/processed.
+        # Guardamos el nuevo dataset preparado
+        # dentro de data/processed.
         self.prepared_dataset_repository.save(
             prepared_dataset
         )
 
         # ---------------------------------------------------------
-        # 6. RESUMEN DEL PROCESO
+        # 8. RESUMEN DEL PROCESO
         # ---------------------------------------------------------
 
         return {
-            "original_records": int(original_records),
-            "prepared_records": int(final_records),
+            "feature_set": FEATURE_SET_NAME,
+
+            "original_records": int(
+                original_records
+            ),
+
+            "prepared_records": int(
+                final_records
+            ),
+
             "excluded_records": int(
                 original_records - final_records
             ),
+
             "predictor_variables": int(
-                len(self.CATEGORICAL_VARIABLES)
-                + len(self.NUMERIC_VARIABLES)
+                len(CATEGORICAL_VARIABLES)
+                + len(NUMERIC_VARIABLES)
             ),
-            "target_variable": self.TARGET_VARIABLE
+
+            "categorical_variables": int(
+                len(CATEGORICAL_VARIABLES)
+            ),
+
+            "numeric_variables": int(
+                len(NUMERIC_VARIABLES)
+            ),
+
+            "target_variable": TARGET_VARIABLE
         }
