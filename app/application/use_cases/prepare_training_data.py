@@ -1,15 +1,14 @@
 from sklearn.model_selection import train_test_split
 
-from app.infrastructure.ml.preprocessing import (
+from app.domain.model_features import (
     CATEGORICAL_VARIABLES,
-    NUMERIC_VARIABLES
+    NUMERIC_VARIABLES,
+    TARGET_VARIABLE
 )
 
 
 class PrepareTrainingDataUseCase:
 
-    # Variable que intentaremos predecir.
-    TARGET_VARIABLE = "COSM2"
 
     # Semilla fija utilizada para que la división de datos
     # sea reproducible.
@@ -54,7 +53,7 @@ class PrepareTrainingDataUseCase:
 
         # y contiene la respuesta que queremos aprender:
         # el costo estimado por metro cuadrado.
-        y = dataset[self.TARGET_VARIABLE].copy()
+        y = dataset[TARGET_VARIABLE].copy()
 
         # ---------------------------------------------------------
         # 4. DIVISIÓN ENTRENAMIENTO / VALIDACIÓN
